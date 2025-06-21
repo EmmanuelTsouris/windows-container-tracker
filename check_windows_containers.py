@@ -3,23 +3,18 @@ import json
 import os
 from datetime import datetime
 
-# List of Microsoft Windows container repos on Docker Hub/MCR to track
-WINDOWS_REPOS = [
-    "windows/servercore",
-    "windows/nanoserver",
-    "windows",
-    "windows/servercore/iis",
-    "dotnet/aspnet",
-    "dotnet/runtime",
-    "dotnet/sdk",
-    "dotnet/framework/aspnet",
-    "dotnet/framework/runtime",
-    "dotnet/framework/sdk"
-    # add more as needed
-]
-
+CONFIG_FILE = "config.json"
 STATE_FILE = "windows_container_state.json"
-MCR_NAMESPACE = "mcr.microsoft.com/"
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(f"Config file '{CONFIG_FILE}' not found. Please create it with a 'repos' key.")
+    with open(CONFIG_FILE, "r") as f:
+        data = json.load(f)
+        repos = data.get("repos")
+        if not repos or not isinstance(repos, list):
+            raise ValueError("Config file must contain a 'repos' key with a list of repository names.")
+        return repos
 
 def get_latest_tag_info(repo):
     """
@@ -64,11 +59,17 @@ def save_state(state):
 
 def main():
     print(f"Checking Microsoft Windows container images at {datetime.utcnow().isoformat()}Z")
+    try:
+        repos = load_config()
+    except Exception as e:
+        print(f"Failed to load config: {e}")
+        return
+
     old_state = load_state()
     new_state = {}
     updates = []
 
-    for repo in WINDOWS_REPOS:
+    for repo in repos:
         info = get_latest_tag_info(repo)
         if info:
             new_state[repo] = info

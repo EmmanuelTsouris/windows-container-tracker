@@ -1,0 +1,8 @@
+{
+  "repos": [
+    "windows/server",
+    "windows/servercore",
+    "windows/nanoserver",
+    "windows/insider"
+  ]
+}
