@@ -1,8 +1,16 @@
 {
   "repos": [
-    "windows/server",
-    "windows/servercore",
-    "windows/nanoserver",
-    "windows/insider"
+    {
+      "name": "windows/server",
+      "tags": ["ltsc2019-*-amd64", "ltsc2022-*-amd64", "ltsc2025-*-amd64"]
+    },
+    {
+      "name": "windows/servercore",
+      "tags": ["ltsc2019-*-amd64", "ltsc2022-*-amd64", "ltsc2025-*-amd64"]
+    },
+    {
+      "name": "windows/nanoserver",
+      "tags": ["ltsc2019-*-amd64", "ltsc2022-*-amd64", "ltsc2025-*-amd64"]
+    }
   ]
 }

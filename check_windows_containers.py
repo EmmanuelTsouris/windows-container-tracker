@@ -2,51 +2,83 @@ import requests
 import json
 import os
 from datetime import datetime
+import fnmatch
 
 def load_config(config_path="config.json"):
-    """
-    Load the list of repositories from the config file.
-    Raises an error if the file is missing or invalid.
-    """
     with open(config_path, "r") as f:
         data = json.load(f)
         repos = data.get("repos")
         if not repos or not isinstance(repos, list):
-            raise ValueError("Config file must contain a 'repos' key with a list of repository names.")
-        return repos
+            raise ValueError("Config file must contain a 'repos' key with a list of repository names or objects.")
+        normalized = []
+        for entry in repos:
+            if isinstance(entry, str):
+                normalized.append({"name": entry, "tags": None})
+            elif isinstance(entry, dict) and "name" in entry:
+                normalized.append({"name": entry["name"], "tags": entry.get("tags")})
+            else:
+                raise ValueError("Each repo entry must be a string or a dict with at least a 'name' key.")
+        return normalized
 
-def get_latest_tag_info(repo):
-    """
-    Fetch the latest tag, digest, and last-modified headers for a given repo.
-    Returns None if no tags are found or an error occurs.
-    """
-    tags_url = f"https://mcr.microsoft.com/v2/{repo}/tags/list"
+def get_tag_info(repo, tag):
+    manifest_url = f"https://mcr.microsoft.com/v2/{repo}/manifests/{tag}"
+    headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
     try:
-        tags_resp = requests.get(tags_url, timeout=10)
-        tags_resp.raise_for_status()
-        tags_data = tags_resp.json()
-        tags = tags_data.get("tags", [])
-        if not tags:
-            return None
-        # Sort tags to get the latest (highest) one
-        sorted_tags = sorted(tags, reverse=True)
-        tag = sorted_tags[0]
-        manifest_url = f"https://mcr.microsoft.com/v2/{repo}/manifests/{tag}"
-        headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
-        manifest_resp = requests.get(manifest_url, headers=headers, timeout=10)
-        manifest_resp.raise_for_status()
-        digest = manifest_resp.headers.get("Docker-Content-Digest")
-        last_modified = manifest_resp.headers.get("Last-Modified")
-        return {"tag": tag, "digest": digest, "last_modified": last_modified}
+        resp = requests.get(manifest_url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        digest = resp.headers.get("Docker-Content-Digest")
+        last_modified = resp.headers.get("Last-Modified")
+        return {"digest": digest, "last_modified": last_modified}
+    except requests.exceptions.HTTPError as e:
+        if resp.status_code == 404:
+            return "NOT_FOUND"
+        print(f"Error fetching {repo}:{tag}: {e}")
+        return None
     except Exception as e:
-        print(f"Error fetching {repo}: {e}")
+        print(f"Error fetching {repo}:{tag}: {e}")
         return None
 
-# State backend supporting local file (default) and S3 (for Lambda/deployment)
+def get_latest_tag_info(repo, pattern="*"):
+    """
+    Returns info for the latest tag matching the pattern for the given repo.
+    """
+    tags = get_tags(repo)
+    import fnmatch
+    matching = sorted([t for t in tags if fnmatch.fnmatch(t, pattern)])
+    if not matching:
+        print(f"No tags found for {repo} matching pattern '{pattern}'")
+        return None
+    latest_tag = matching[-1]
+    info = get_tag_info(repo, latest_tag)
+    if not info or info == "NOT_FOUND":
+        print(f"Could not fetch info for latest tag {latest_tag} in {repo}")
+        return None
+    return {"tag": latest_tag, "digest": info["digest"], "last_modified": info["last_modified"]}
+
+def get_tags(repo):
+    tags_url = f"https://mcr.microsoft.com/v2/{repo}/tags/list"
+    try:
+        resp = requests.get(tags_url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("tags", [])
+    except Exception as e:
+        print(f"Error fetching tags for {repo}: {e}")
+        return []
+
+def expand_wildcard_tags(available_tags, patterns):
+    if not patterns:
+        return available_tags
+    selected = set()
+    for pat in patterns:
+        if "*" in pat or "?" in pat:
+            selected.update(t for t in available_tags if fnmatch.fnmatch(t, pat))
+        else:
+            if pat in available_tags:
+                selected.add(pat)
+    return list(selected)
+
 def load_state(state_file="windows_container_state.json"):
-    """
-    Load the previous state from local disk or S3, depending on environment variable STATE_BACKEND.
-    """
     backend = os.environ.get("STATE_BACKEND", "local")
     if backend == "s3":
         import boto3
@@ -62,16 +94,12 @@ def load_state(state_file="windows_container_state.json"):
             print(f"Error loading state from S3: {e}")
             return {}
     else:
-        # Local file fallback (dev/test)
         if os.path.exists(state_file):
             with open(state_file, "r") as f:
                 return json.load(f)
         return {}
 
 def save_state(state, state_file="windows_container_state.json"):
-    """
-    Save state to local disk or S3, depending on environment variable STATE_BACKEND.
-    """
     backend = os.environ.get("STATE_BACKEND", "local")
     if backend == "s3":
         import boto3
@@ -83,37 +111,62 @@ def save_state(state, state_file="windows_container_state.json"):
         except Exception as e:
             print(f"Error saving state to S3: {e}")
     else:
-        # Write to local JSON file
         with open(state_file, "w") as f:
             json.dump(state, f, indent=2)
 
 def check_images(repos, old_state):
     """
-    For each repo, get latest info and compare with previous state.
+    For each repo, check user-specified tags (including wildcards) if present; else, all tags.
+    Avoid rechecking tags that previously returned 404 (stored in not_found).
     Returns new_state and any updates found.
     """
     new_state = {}
     updates = []
-    for repo in repos:
-        info = get_latest_tag_info(repo)
-        if info:
-            new_state[repo] = info
-            old_info = old_state.get(repo)
-            if not old_info:
-                # New repository detected (not seen before)
-                updates.append(f"[NEW] {repo}: tag={info['tag']}, digest={info['digest']}")
-            elif info["digest"] != old_info.get("digest"):
-                # Digest has changed for this repo
-                updates.append(f"[UPDATED] {repo}: tag={info['tag']}, new digest={info['digest']} (was {old_info.get('digest')})")
-        else:
-            print(f"  - No tags found for {repo} or error occurred.")
+    for repo_entry in repos:
+        repo_name = repo_entry["name"]
+        specified_tags = repo_entry.get("tags")
+        repo_state = old_state.get(repo_name, {})
+        try:
+            available_tags = get_tags(repo_name)
+        except Exception as e:
+            print(f"Error fetching tags for {repo_name}: {e}")
+            available_tags = []
+        not_found = set(repo_state.get("not_found", []))  # tags previously found to be 404
+
+        tags_to_check = expand_wildcard_tags(available_tags, specified_tags) if specified_tags else available_tags
+        tags_to_check = [t for t in tags_to_check if t not in not_found]
+
+        new_repo_state = {k: v for k, v in repo_state.items() if k != "not_found"}  # Copy old state except not_found
+        new_not_found = set(not_found)
+        found_this_run = set()
+
+        for tag in tags_to_check:
+            old_tag = repo_state.get(tag)
+            info = get_tag_info(repo_name, tag)
+            if info and info != "NOT_FOUND":
+                # If it was previously in not_found but is now available, remove from not_found
+                found_this_run.add(tag)
+                if tag in new_not_found:
+                    new_not_found.remove(tag)
+                if not old_tag:
+                    updates.append(f"[NEW TAG] {repo_name}:{tag} digest={info['digest']}")
+                elif info["digest"] != old_tag.get("digest"):
+                    updates.append(f"[UPDATED DIGEST] {repo_name}:{tag} new digest={info['digest']} (was {old_tag.get('digest')})")
+                new_repo_state[tag] = info
+            elif info == "NOT_FOUND":
+                # Only log the first time we see the 404 for this tag
+                if tag not in not_found:
+                    print(f"404 NOT FOUND: {repo_name}:{tag}")
+                new_not_found.add(tag)
+
+        # Always remove any tags from not_found that are no longer in the expanded tag list (i.e., they've been deleted upstream)
+        new_not_found = {t for t in new_not_found if t in available_tags}
+        # Save the updated not_found list
+        new_repo_state["not_found"] = sorted(list(new_not_found))
+        new_state[repo_name] = new_repo_state
     return new_state, updates
 
 def main(config_path="config.json", state_file="windows_container_state.json"):
-    """
-    Main entrypoint for local execution.
-    Loads config, loads previous state, checks for image updates, saves new state.
-    """
     print(f"Checking Microsoft Windows container images at {datetime.utcnow().isoformat()}Z")
     try:
         repos = load_config(config_path)
@@ -131,14 +184,12 @@ def main(config_path="config.json", state_file="windows_container_state.json"):
     else:
         print("No changes detected.")
 
-    save_state(new_state, state_file)
+    try:
+        save_state(new_state, state_file)
+    except Exception as e:
+        print(f"Error saving state: {e}")
 
-# Lambda entry point
 def lambda_handler(event, context):
-    """
-    Lambda-compatible entrypoint.
-    Uses environment variables for config and state paths.
-    """
     config_path = os.environ.get("CONFIG_PATH", "config.json")
     state_file = os.environ.get("STATE_FILE", "windows_container_state.json")
     main(config_path, state_file)
