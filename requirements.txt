@@ -1,1 +1,4 @@
-requests>=2.25.0
+pytest
+coverage
+boto3
+requests
