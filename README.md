@@ -133,4 +133,4 @@ def lambda_handler(event, context):
 
 ## License
 
-MIT
+[MIT](LICENSE)
