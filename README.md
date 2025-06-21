@@ -22,15 +22,17 @@ Below is the architecture for both local development and AWS Lambda production d
 ```mermaid
 flowchart TD
   subgraph AWS_Production
-    EventBridge((EventBridge<br/>(CloudWatch Events)))
+    EventBridge(("EventBridge
+(CloudWatch Events)"))
     LambdaFunction([Lambda Function])
-    S3[(S3 Bucket<br>State Storage)]
+    S3(("S3 Bucket
+State Storage"))
     EventBridge --> LambdaFunction
     LambdaFunction -- load/save state --> S3
   end
   subgraph Local_Dev
     Script([Local Script])
-    StateFile[("Local JSON State File")]
+    StateFile(("Local JSON State File"))
     Script -- load/save state --> StateFile
   end
 ```
