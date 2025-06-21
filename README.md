@@ -1,65 +1,131 @@
 # Windows Container Tracker
 
-A Python utility to monitor official Microsoft Windows container images on [MCR](https://mcr.microsoft.com/) (Microsoft Container Registry).  
-It tracks the latest tags and digests for selected images, making it easy to see when a new Windows base image (such as `servercore` or `nanoserver`) is published.
+This project tracks Microsoft Windows container images (from MCR) and checks for updates based on tags and digests. The script is structured to be AWS Lambda compatible and is fully unit tested.
 
 ## Features
 
-- Tracks a customizable list of Microsoft Windows container images.
-- Compares current and previous state to detect new tags or updated images.
-- Stores state in a local JSON file (`windows_container_state.json`).
-- Reports changes between runs.
-- Easy to schedule for daily or periodic checks.
+- Loads a list of repos from `config.json`
+- Fetches latest tags and digests for each repo from MCR
+- Compares current state to previous run, reporting new or updated images
+- Easily deployable as an AWS Lambda function
+- Includes unit tests and code coverage support
 
-## Requirements
+---
+
+## Getting Started
+
+### Prerequisites
 
 - Python 3.7+
-- [requests](https://pypi.org/project/requests/) library
+- [pip](https://pip.pypa.io/en/stable/installation/)
 
-Install requirements with:
+### Installation
 
-```bash
-pip install requests
-```
+1. Clone the repository:
 
-## Usage
-
-1. Clone this repository:
    ```bash
    git clone https://github.com/yourusername/windows-container-tracker.git
    cd windows-container-tracker
    ```
 
-2. (Optional) Edit the list of tracked container images in the script (`WINDOWS_REPOS`).
+2. (Optional but recommended) Create a virtual environment:
 
-3. Run the tracker:
    ```bash
-   python check_windows_containers.py
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-   - On first run, it initializes the state file.
-   - On subsequent runs, it reports any new or updated images.
+3. Install dependencies:
 
-4. Schedule the script for regular checks (e.g., with [Windows Task Scheduler](https://learn.microsoft.com/en-us/windows/win32/taskschd/task-scheduler-start-page) or `cron` on Linux).
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-## Example Output
+   For development and testing, also install:
 
-```
-Checking Microsoft Windows container images at 2025-06-21T07:07:09Z
-Changes detected:
-  [UPDATED] windows/servercore: tag=latest, new digest=sha256:abcd1234 (was sha256:old5678)
-  [NEW] windows/nanoserver: tag=2025-06-20, digest=sha256:efgh5678
-```
-
-## Customization
-
-- To add or remove tracked images, edit the `WINDOWS_REPOS` list in `check_windows_containers.py`.
-- To track all tags (not just the latest), extend the script as needed.
-
-## License
-
-MIT License
+   ```bash
+   pip install pytest pytest-cov
+   ```
 
 ---
 
-*Inspired by the need to stay up-to-date with Windows container base image releases.*
+## Usage
+
+### Run the Tracker Locally
+
+```bash
+python check_windows_containers.py
+```
+
+- The script reads repositories from `config.json` and maintains state in `windows_container_state.json`.
+
+### AWS Lambda
+
+The main script includes a `lambda_handler(event, context)` entrypoint for easy AWS Lambda deployment.
+Configure your Lambda environment variables for custom config or state file locations if needed.
+
+---
+
+## Configuration
+
+Edit `config.json` to specify which repositories to track:
+
+```json
+{
+  "repos": [
+    "windows/servercore",
+    "windows/nanoserver"
+  ]
+}
+```
+
+---
+
+## Testing
+
+### Run Unit Tests
+
+All tests are in the `tests/` directory and use `pytest`.
+
+```bash
+pytest
+```
+
+### Run Tests with Coverage
+
+To see which code is covered by tests:
+
+```bash
+pytest --cov=check_windows_containers --cov-report=term-missing
+```
+
+- This shows a summary and missing lines in the terminal.
+
+#### Generate an HTML coverage report:
+
+```bash
+pytest --cov=check_windows_containers --cov-report=html
+```
+
+- Open `htmlcov/index.html` in your browser for a detailed, color-coded report.
+
+---
+
+## Tips
+
+- Run `pytest` from the project root to ensure imports work correctly.
+- If you add new dependencies for testing, update `requirements.txt` or create a `requirements-dev.txt`.
+- To increase coverage, test edge cases and error handling (e.g., missing config, failed network calls).
+- Use the HTML coverage report to identify untested code paths visually.
+
+---
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+
+---
+
+## License
+
+[MIT](LICENSE)
