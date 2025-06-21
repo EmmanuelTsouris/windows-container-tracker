@@ -22,7 +22,7 @@ Below is the architecture for both local development and AWS Lambda production d
 ```mermaid
 flowchart TD
   subgraph AWS_Production
-    EventBridge((EventBridge<br>(CloudWatch Events)))
+    EventBridge((EventBridge<br/>(CloudWatch Events)))
     LambdaFunction([Lambda Function])
     S3[(S3 Bucket<br>State Storage)]
     EventBridge --> LambdaFunction
