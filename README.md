@@ -73,6 +73,25 @@ State Storage"))
   python check_windows_containers.py
   ```
 
+### Sample Output
+
+When new container images are available:
+
+```text
+check_windows_containers.py
+Checking Microsoft Windows container images at 2025-06-21T06:42:42.901613Z
+Changes detected:
+  [NEW] windows/server: tag=some-tag, digest=sha256:d0b929fbf30696db7cfa6af63cbfaa54964c2c583b6a77c934f015b5f3117fd1
+```
+
+When there are no changes:
+
+```text
+check_windows_containers.py
+Checking Microsoft Windows container images at 2025-06-21T06:42:42.842400Z
+No changes detected.
+```
+
 ---
 
 ## Running in AWS Lambda (Production)
