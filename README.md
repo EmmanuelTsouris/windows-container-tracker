@@ -12,6 +12,7 @@ A script and AWS Lambda function to monitor Microsoft Windows container images o
 - Compares latest tags and digests
 - Reports new images or updates since last run
 - Can run locally (for development/testing) or as a scheduled AWS Lambda function (for production)
+- Robust error handling and state persistence (local or S3)
 
 ---
 
@@ -58,9 +59,20 @@ State Storage"))
    }
    ```
 
+   You may also specify tag patterns to track (wildcards supported):
+
+   ```json
+   {
+     "repos": [
+       { "name": "windows/servercore", "tags": ["ltsc2022-*"] },
+       "windows/nanoserver"
+     ]
+   }
+   ```
+
 2. **State Storage:**
    - **Local/Dev:** State (i.e., previous check results) is stored as a JSON file (`windows_container_state.json`) in the working directory.
-   - **Production (Lambda):** State is stored in an S3 bucket as an object.
+   - **Production (Lambda):** State is stored in an S3 bucket as an object. The backend is switched using the `STATE_BACKEND` environment variable.
 
 ---
 
@@ -78,16 +90,14 @@ State Storage"))
 When new container images are available:
 
 ```text
-check_windows_containers.py
 Checking Microsoft Windows container images at 2025-06-21T06:42:42.901613Z
 Changes detected:
-  [NEW] windows/server: tag=some-tag, digest=sha256:d0b929fbf30696db7cfa6af63cbfaa54964c2c583b6a77c934f015b5f3117fd1
+  [NEW TAG] windows/server:some-tag digest=sha256:d0b929fbf30696db7cfa6af63cbfaa54964c2c583b6a77c934f015b5f3117fd1
 ```
 
 When there are no changes:
 
 ```text
-check_windows_containers.py
 Checking Microsoft Windows container images at 2025-06-21T06:42:42.842400Z
 No changes detected.
 ```
@@ -98,19 +108,20 @@ No changes detected.
 
 ### 1. **Switch to S3 State Backend**
 
-For production/Lambda deployments, **remove the local JSON state backend** and use the S3 backend for state storage.
+For production/Lambda deployments, use the S3 backend for state storage by setting the `STATE_BACKEND` environment variable to `s3`.
 
-- Use the provided `state_backend_s3.py` for clean S3 state management.
-- Do not include or call the local JSON-based load/save functions in your deployed Lambda.
+- The script will automatically use S3 if the `STATE_BACKEND` environment variable is set to `s3` (and required S3 variables are set).
+- Do not leave local JSON-based state code in your Lambda deployment unless you need it for debugging.
 
 ### 2. **Environment Variables**
 
 Set these Lambda environment variables:
 
-| Name         | Description                               | Example                        |
-|--------------|-------------------------------------------|--------------------------------|
-| `S3_BUCKET`  | Name of the S3 bucket for state storage   | `my-container-state-bucket`    |
-| `STATE_KEY`  | (Optional) S3 object key for the state    | `windows_container_state.json` |
+| Name           | Description                               | Example                        |
+|----------------|-------------------------------------------|--------------------------------|
+| `STATE_BACKEND`| Must be `s3` to use S3 for state          | `s3`                           |
+| `S3_BUCKET`    | Name of the S3 bucket for state storage   | `my-container-state-bucket`    |
+| `STATE_KEY`    | (Optional) S3 object key for the state    | `windows_container_state.json` |
 
 ### 3. **IAM Permissions**
 
@@ -126,27 +137,28 @@ for your chosen S3 bucket.
 
 ### 5. **Lambda Handler Example**
 
-Your deployed Lambda should import and use only the S3 backend:
+Your Lambda function entry point is:
 ```python
-from state_backend_s3 import load_state, save_state
-
 def lambda_handler(event, context):
-    # Load repositories, e.g. from config.json in your deployment package or another source
-    repos = load_config("config.json")
-    old_state = load_state()
-    new_state, updates = check_images(repos, old_state)
-    # ... (report updates as needed) ...
-    save_state(new_state)
+    # config_path and state_file are set from environment or defaults
+    main()
     return {"status": "completed"}
 ```
-**Remove or comment out any code that refers to local JSON files for state.**
+**Make sure to set the environment variables as above for S3 state.**
 
 ---
 
 ## Notes
 
-- The Lambda function and script logic are designed to support both local and production use-cases, but production deployments should **exclusively use the S3 backend** for state.
-- If testing new features or debugging, use the local backend and then switch to S3 before deploying.
+- The script and Lambda function are designed for both local and production use-cases. **Production should use S3 for state.**
+- When testing new features or debugging, use the local backend and then switch to S3 before deploying.
+
+---
+
+## Versioning
+
+- See [Releases](https://github.com/EmmanuelTsouris/windows-container-tracker/releases) for tagged versions.
+- Latest patch release: **v1.0.1** (bugfixes, improved error handling, and complete test coverage).
 
 ---
 
